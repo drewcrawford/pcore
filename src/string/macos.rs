@@ -82,11 +82,11 @@ impl<'a> From<&'a Pstr> for &'a NSString {
 
 //conversion to/from string types
 impl Pstr {
-    //note that on macOS, we generally can't create borrowed types directly, so a move like &str -> &Pstr is not allowed.
     ///Converts from &Pstr to &str
-    pub fn as_str(&self, pool: &ReleasePool) -> &str {
+    /// This may involve a copy
+    pub fn to_string(&self, pool: &ReleasePool) -> &str {
         let nsstring = self.as_platform_str();
-        nsstring.to_str(pool)
+        nsstring.to_string()
     }
 }
 

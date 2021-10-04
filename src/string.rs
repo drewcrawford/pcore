@@ -18,5 +18,11 @@ of functionality appropriate for cross-platform code.  A programmer willing to w
 directly may be able to beat the performance of P types.
 
  */
+#[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
 pub use macos::*;
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(target_os = "windows")]
+pub use windows::*;
