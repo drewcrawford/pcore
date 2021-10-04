@@ -38,12 +38,12 @@ impl PString {
 //note: not implemented as From/Into becuase of release_pool arg.
 impl PString {
     ///On Windows, this operation involves a copy and encode
-    pub fn from_string(s: String, pool: &ReleasePool) -> Self {
+    pub fn from_string(s: String, _pool: &ReleasePool) -> Self {
         let cstr = U16CString::from_str(s).unwrap().into_vec().into_boxed_slice();
         Self(cstr)
     }
     ///On windows, this operation involves a copy and encode
-    pub fn into_string(self, pool: &ReleasePool) -> String {
+    pub fn into_string(self, _pool: &ReleasePool) -> String {
         let cstr = unsafe{ U16CStr::from_ptr_str(self.0.as_ptr())};
         cstr.to_string().unwrap()
     }
@@ -75,9 +75,7 @@ impl Pstr {
     ///
     /// If you pass it to a fn expecting a mutable string, result is undefined.
     pub unsafe fn as_platform_str(&self) -> PWSTR {
-        unsafe {
-            PWSTR(std::mem::transmute(self))
-        }
+        PWSTR(std::mem::transmute(self))
     }
 }
 
@@ -86,8 +84,8 @@ impl Pstr {
     //note that on macOS, we generally can't create borrowed types directly, so a move like &str -> &Pstr is not allowed.
     ///Note that on windows, we can't implement `as_str`, we need `to_string()`.
     ///Converts from &Pstr to &str
-    pub fn to_string(&self, pool: &ReleasePool) -> String {
-        ///We aren't mutating the string
+    pub fn to_string(&self, _pool: &ReleasePool) -> String {
+        //We aren't mutating the string
         let platform = unsafe{ self.as_platform_str()};
         unsafe{ U16CStr::from_ptr_str(platform.0)}.to_string().unwrap()
     }
