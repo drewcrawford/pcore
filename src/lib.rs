@@ -7,5 +7,5 @@ pcore is a tiny library abstracting over certain *core* differences in *platform
 */
 pub mod string;
 pub mod release_pool;
-mod error;
+pub mod error;
 
