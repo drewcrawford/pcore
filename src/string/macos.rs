@@ -84,9 +84,9 @@ impl<'a> From<&'a Pstr> for &'a NSString {
 impl Pstr {
     ///Converts from &Pstr to &str
     /// This may involve a copy
-    pub fn to_string(&self, pool: &ReleasePool) -> &str {
+    pub fn to_string(&self, pool: &ReleasePool) -> String {
         let nsstring = self.as_platform_str();
-        nsstring.to_string()
+        nsstring.to_str(pool).to_owned()
     }
 }
 
