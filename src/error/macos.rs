@@ -1,6 +1,6 @@
-use foundationr::*;
 use objr::bindings::StrongCell;
 use std::fmt::{Display, Formatter};
+use objr::foundation::NSError;
 
 #[derive(Debug)]
 pub struct Error(StrongCell<NSError>);
