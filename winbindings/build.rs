@@ -1,6 +1,6 @@
 fn main() {
     windows::build! {
-        Windows::Win32::Foundation::PWSTR,
-        Windows::Win32::System::Diagnostics::Debug::WIN32_ERROR
+        Windows::Win32::System::Diagnostics::Debug::{WIN32_ERROR,GetLastError},
+        Windows::Win32::System::WinRT::{HSTRING_HEADER,WindowsCreateStringReference}
     }
 }

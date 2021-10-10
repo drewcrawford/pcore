@@ -90,6 +90,7 @@ impl Pstr {
     }
 }
 
+
 ///Declares a compile-time pstr
 /// ```
 /// use pcore::pstr;

@@ -11,6 +11,17 @@ impl Error {
     pub fn into_platform(self) -> WIN32_ERROR {
         self.0
     }
+    pub fn as_platform(&self) -> &WIN32_ERROR {
+        &self.0
+    }
+    ///Calls GetLastError.
+    ///
+    /// Using this in pcore avoids a whole class of problems of the form "both you and some dependency
+    /// import WIN32_ERROR, but they're different types"
+    pub fn last() -> Self {
+        use winbindings::Windows::Win32::System::Diagnostics::Debug::GetLastError;
+        Error(unsafe{GetLastError()})
+    }
 }
 impl From<WIN32_ERROR> for Error {
     fn from(e: WIN32_ERROR) -> Self {
