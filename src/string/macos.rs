@@ -1,104 +1,90 @@
-
-
 use objr::bindings::*;
-use crate::release_pool::ReleasePool;
-use std::ffi::c_void;
-use std::ops::Deref;
+use std::os::raw::c_ulong;
+pub use objr::foundation::objc_nsstring as __objc_nsstring;
 
-///An owned string type
-#[derive(Debug)]
-pub struct PString(StrongCell<NSString>);
+type NSUInteger = c_ulong;
 
-//conversions to/from platform version
-impl PString {
-    ///Converts into a platform-specific representation
-    pub fn into_platform_string(self) -> StrongCell<NSString> {
+///Type that can be converted into a platform string parameter.
+///
+/// The methods of this trait is platform-specific, so don't use them in cross-platform code.
+/// The type itself however, is available everywhere.
+///
+/// Generally you want to accept a generic parameter of the form `<K: IntoParameterString>`.
+pub trait IntoParameterString<'a> {
+    ///Converts to an NSString.
+    ///
+    /// `storage`: Pass an instance of `MaybeUninit` here.
+    fn into_nsstring(self, pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString>;
+    ///Erases to a parameter string
+    fn into_parameter_string(self, pool: &ActiveAutoreleasePool) -> ParameterString<'a> where Self: Sized {
+        ParameterString(self.into_nsstring(pool))
+    }
+}
+
+//private extensions to NSString
+
+objc_selector_group! {
+    trait NSStringExtensionSelectors {
+        @selector("initWithBytesNoCopy:length:encoding:freeWhenDone:")
+    }
+    impl NSStringExtensionSelectors for Sel {}
+}
+
+trait NSStringExtension {
+    fn from_bytes_no_copy<'a>(bytes: &'a [u8], pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString>;
+}
+impl NSStringExtension for NSString {
+    fn from_bytes_no_copy<'a>(bytes: &'a [u8], pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString> {
+        unsafe {
+            let uninit = Self::class().alloc(pool);
+            let ptr = Self::perform(uninit, Sel::initWithBytesNoCopy_length_encoding_freeWhenDone(), pool, (bytes.as_ptr(), bytes.len() as NSUInteger, 4 as NSUInteger, false));
+            NSString::assume_nonnil(ptr).assume_retained_limited()
+        }
+    }
+}
+
+impl<'a> IntoParameterString<'a> for &'a str {
+    ///Borrow the bytes into an NSString instance.
+    fn into_nsstring(self, pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString> {
+        NSString::from_bytes_no_copy(self.as_bytes(), pool)
+    }
+}
+
+pub struct ParameterString<'a>(StrongLifetimeCell<'a, NSString>);
+impl<'a> IntoParameterString<'a> for ParameterString<'a> {
+    fn into_nsstring(self, _pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString> {
         self.0
     }
-    ///Converts from a platform-specific representation
-    pub fn from_platform_string(platform: StrongCell<NSString>) -> Self {
-        PString(platform)
+}
+pub struct OwnedString(StrongCell<NSString>);
+impl OwnedString {
+    ///Create a new [OwnedString] by copying another string.
+    pub fn new<'a, S: IntoParameterString<'a>>(string: S, pool: &ActiveAutoreleasePool) -> Self {
+        let str = string.into_nsstring(pool);
+        OwnedString(str.copy(pool))
     }
 }
-
-impl From<PString> for StrongCell<NSString> {
-    fn from(f: PString) -> Self {
-        f.into_platform_string()
+#[doc(hidden)]
+pub struct StaticString(
+    #[doc(hidden)]
+    pub &'static NSString
+);
+impl IntoParameterString<'static> for StaticString {
+    fn into_nsstring(self, _pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'static, NSString> {
+        unsafe{StrongLifetimeCell::assume_retained_limited(self.0) }
     }
 }
-impl From<StrongCell<NSString>> for PString {
-    fn from(platform: StrongCell<NSString>) -> Self {
-        PString::from_platform_string(platform)
-    }
-}
-
-//conversions to/from String.
-//note: not implemented as From/Into becuase of release_pool arg.
-impl PString {
-    ///On macOS, this operation requires a copy.
-    pub fn from_string(s: String, pool: &ReleasePool) -> Self {
-        Self(NSString::with_str_copy(&s, pool))
-    }
-    ///On macOS, this operation requires a copy.
-    pub fn into_string(self, pool: &ReleasePool) -> String {
-        self.0.to_str(pool).to_string()
-    }
-}
-
-///Borrowed platform string type
+/// Provides a compile-time optimized path for parameter strings.
 ///
-/// On macOS, pointers to this type are pointers to &NSString
-pub struct Pstr(*const c_void);
-
-impl Deref for PString {
-    type Target = Pstr;
-
-    fn deref(&self) -> &Self::Target {
-        let as_nsstring: &NSString = &self.0;
-        Pstr::from_platform_str(as_nsstring)
-    }
-}
-
-//conversions to/from platform types
-impl Pstr {
-    pub fn from_platform_str(source: &NSString) -> &Self {
-        unsafe{ std::mem::transmute(source) }
-    }
-    pub fn as_platform_str(&self) -> &NSString {
-        unsafe { std::mem::transmute(self) }
-    }
-}
-
-impl<'a> From<&'a NSString> for &'a Pstr {
-    fn from(source: &'a NSString) -> Self {
-        Pstr::from_platform_str(source)
-    }
-}
-impl<'a> From<&'a Pstr> for &'a NSString {
-    fn from(source: &'a Pstr) -> Self {
-        Pstr::as_platform_str(source)
-    }
-}
-
-//conversion to/from string types
-impl Pstr {
-    ///Converts from &Pstr to &str
-    /// This may involve a copy
-    pub fn to_string(&self, pool: &ReleasePool) -> String {
-        let nsstring = self.as_platform_str();
-        nsstring.to_str(pool).to_owned()
-    }
-}
-
-
-///Declares a compile-time pstr
+/// This macro is defined to return a type of [IntoPlatformString] that is reasonably fast
 /// ```
 /// use pcore::pstr;
-/// let my_string = pstr!("My test string");
+/// let e = pstr!("test");
+///
 /// ```
 #[macro_export]
 macro_rules! pstr {
-    ($str:literal) => {
-        pcore::string::Pstr::from_platform_str(objr::bindings::objc_nsstring!($str))
+    ($expr:literal) => {
+        pcore::string::StaticString(pcore::string::__objc_nsstring!($expr))
     }
 }

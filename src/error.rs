@@ -1,6 +1,8 @@
 /**
 Defines [Error], a platform-specific error type.  The implementation
 is toll-free bridged to some underlying platform concept of an error.
+
+This supports conversions to and from underlying platform error type(s).
 */
 #[cfg(target_os = "macos")]
 mod macos;

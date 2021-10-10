@@ -5,20 +5,20 @@ use winbindings::Windows::Win32::System::Diagnostics::Debug::WIN32_ERROR;
 pub struct Error(WIN32_ERROR);
 
 impl Error {
-    pub fn from_platform(platform: WIN32_ERROR) -> Self {
+    pub fn from_win32(platform: WIN32_ERROR) -> Self {
         Error(platform)
     }
-    pub fn into_platform(self) -> WIN32_ERROR {
+    pub fn into_win32(self) -> WIN32_ERROR {
         self.0
     }
-    pub fn as_platform(&self) -> &WIN32_ERROR {
+    pub fn as_win32(&self) -> &WIN32_ERROR {
         &self.0
     }
     ///Calls GetLastError.
     ///
     /// Using this in pcore avoids a whole class of problems of the form "both you and some dependency
     /// import WIN32_ERROR, but they're different types"
-    pub fn last() -> Self {
+    pub fn win32_last() -> Self {
         use winbindings::Windows::Win32::System::Diagnostics::Debug::GetLastError;
         Error(unsafe{GetLastError()})
     }

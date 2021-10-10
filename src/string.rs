@@ -1,22 +1,27 @@
 /**
-Provides [PString] and [Pstr], which are "platform string" types.  These types
-store the string in whatever internal format is appropriate to the platform,
-which may be different than the Rust internal format.
+Provides toll-free bridging to OS-specific strings
 
-[PString] is analogous to [String], while [Pstr] is analogous to [str].  The [pstr!] macro allows declaring
-compile-time strings.
+A brief discussion of string types:
 
-Unlike [OSString], P types are represented in their native format.  Passing a P type
-to an OS API should be zero cost.
+* [std::string::String] and [std::str::str] are UTF-8 encoded Rust types
+* [std::ffi::OsString] and [std::ffi::OsStr] are WTF-8 encoded Rust types, some 'relaxed' utf8 encoding appropriate for use in filesystems
+* `NSString`, and specifically Rust projections like `StrongCell<NSString>` are the preferred string type on macOS.  This is an opaque
+   encoding, in some cases UTF-8 and in other cases UTF-16.
+* `HSTRING`, `PWSTR`, etc., are the preferred string type on Windows, UTF-16
 
-Consequently, you may incur some cost (such as a copy) converting between P and Rust formats.
-The exact nature of this cost varies per platform and per the specific conversion, and in some
-cases can be eliminated.
+What we want is:
+1.  Conversions between types are *possible* (potentially slowly, e.g. re-encoding the string)
+2.  But they can be *eliminated* (e.g., by getting your value into the right format to start with)
 
-P types do not express the full potential of the underlying format, but offer some reasonable subset
-of functionality appropriate for cross-platform code.  A programmer willing to work with the platform
-directly may be able to beat the performance of P types.
+To solve this, `pcore` implements a variety of 'API' types:
 
+* [IntoParameterString] is a trait for use on function parameters.  Conforming types provide conversions to the platform string type
+* [ParameterString] erases an [IntoParameterString] into a concrete type.  This is appropriate for short-term use such as struct fields in a
+  builder pattern.
+* [OwnedString] copies the storage from an [IntoParameterString] and has `'static` lifetime.
+* [pstr!] is a macro that gets strings into the correct format at compile-time to avoid runtime encoding.  The return type conforms to [IntoParameterString].
+
+Platforms may have additional types as needed
  */
 #[cfg(target_os = "macos")]
 mod macos;

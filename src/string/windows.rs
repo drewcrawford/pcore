@@ -204,7 +204,7 @@ impl std::fmt::Debug for OwnedString {
 
 /// Provides a compile-time optimized path for parameter strings.
 ///
-/// This macro is defined to return a type of `ToParameterString` that is reasonably fast
+/// This macro is defined to return a type of [IntoParameterString] that is reasonably fast
 /// ```
 /// use pcore::pstr;
 /// let e = pstr!("test");

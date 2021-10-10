@@ -6,21 +6,21 @@ use objr::foundation::NSError;
 pub struct Error(StrongCell<NSError>);
 
 impl Error {
-    pub fn from_platform(platform: StrongCell<NSError>) -> Self {
+    pub fn from_nserror(platform: StrongCell<NSError>) -> Self {
         Error(platform)
     }
-    pub fn into_platform(self) -> StrongCell<NSError> {
+    pub fn into_nserror(self) -> StrongCell<NSError> {
         self.0
     }
 }
 impl From<StrongCell<NSError>> for Error {
     fn from(e: StrongCell<NSError>) -> Self {
-        Error::from_platform(e)
+        Error::from_nserror(e)
     }
 }
 impl From<Error> for StrongCell<NSError> {
     fn from(e: Error) -> Self {
-        e.into_platform()
+        e.into_nserror()
     }
 }
 
