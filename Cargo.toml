@@ -12,3 +12,4 @@ objr = {git = "https://github.com/drewcrawford/objr.git"}
 pcore_winbindings = {path = "winbindings"}
 widestring = "0.4.3"
 wchar = "0.11.0"
+windows = "0.21.1"

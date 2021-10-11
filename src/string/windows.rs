@@ -1,9 +1,83 @@
 use std::mem::MaybeUninit;
-use winbindings::Windows::Win32::System::WinRT::{HSTRING_HEADER,WindowsCreateStringReference};
-use winbindings::HSTRING;
-use winbindings::Windows::Win32::Foundation::PWSTR;
+use pcore_winbindings::Windows::Win32::System::WinRT::{HSTRING_HEADER,WindowsCreateStringReference};
+use pcore_winbindings::Windows::Win32::Foundation::PWSTR;
 use std::hash::{Hash, Hasher};
 use std::fmt::Formatter;
+use std::ffi::c_void;
+use ::windows::{HSTRING, Param};
+
+/**
+For reasons we will never know, Microsoft decided to cripple string interop performance
+for Rust specifically.
+
+Suppose you have some large string in memory somewhere that you want to bridge into a windows HSTRING.
+You can copy the thing at some time/cost, but why do that when you can borrow it?
+
+As it happens, there's been a public Windows API for this since 2012.  It is [documented](https://docs.microsoft.com/en-us/windows/win32/api/winstring/nf-winstring-windowscreatestringreference),
+[devblogged](https://devblogs.microsoft.com/oldnewthing/20160615-00/?p=93675), and [widely used](https://github.com/search?q=windowscreatestringreference&type=code)
+in projects like [chromium](https://github.com/chromium/chromium/blob/72ceeed2ebcd505b8d8205ed7354e862b871995e/base/win/hstring_reference.cc) and [Qt](https://github.com/qt/qtbase/blob/9db7cc79a26ced4997277b5c206ca15949133240/src/plugins/platforms/windows/qwin10helpers.cpp).
+
+However, calling this API using the official Rust bindings, crashes.  I [fixed the crash](https://github.com/microsoft/windows-rs/pull/1208), but MS wants to leave
+the crash in as some kind of warning against faster strings performance.  The tagline is "any Windows API past, present, and future", but evidently not this one.
+
+Since we can't play nice upstream, I have solved their crash here with some complexity.  I'm sorry you have to read it, and even sorrier
+if you end up debugging it.  But I can promise if you send me PRs fixing my crashes I'll merge them :-)
+*/
+#[repr(C)]
+pub struct ICantBelieveItsNotHString<'a>(&'a c_void,Option<Box<[u16]>>);
+impl<'a> ICantBelieveItsNotHString<'a> {
+    ///# Safety
+    /// Can only pass a fast-pass hstring (e.g. created with `WindowsCreateStringReference`).
+    /// Lifetime is not checked
+    unsafe fn from_fastpass_hstring(hstring: HSTRING,backing_data:Option<Box<[u16]>>) -> Self {
+        //read the inner field, this should be a pointer to the HSTRING header
+        //HSTRING is defined #[repr(transparent)] so we should be able to transmute it to its field
+        let field: *const c_void = std::mem::transmute(hstring);
+        let r = ICantBelieveItsNotHString(&*field,backing_data);
+        return r
+    }
+    fn as_hstring(&self) -> &HSTRING {
+        /*
+        So the basis of this trick is that we are layout-compatible with `::windows::HSTRING`.  It is
+        `#[repr(transparent)]`, with one field (which internally points to an HSTRING_HEADER).
+
+        We are #[repr(C)] with the same first field, which, under appropriate laws and regulations,
+        means we can be cast into that type (though not the reverse).
+
+        Thier layout is pretty fixed (I mean, they could change it, but it would be work)
+        so it seems unlikely to me this will break.
+         */
+        unsafe {
+            std::mem::transmute(self)
+        }
+    }
+}
+///This 'public', but `#[doc(hidden)]` API is required to define a type that can be passed
+/// into windows-rs methods.
+impl<'a> ::windows::IntoParam<'a, HSTRING> for &'a ICantBelieveItsNotHString<'a> {
+    fn into_param(self) -> Param<'a, HSTRING> {
+        /*This is really the whole secret, namely, that HSTRING crashes if it's dropped on a fast-pass
+        string.  See https://github.com/microsoft/windows-rs/pull/1208 for "discussion"
+        of their implementation.
+
+        By passing `Param::Borrowed(&HSTRING)` here, we avoid actually creating an owned version of `::windows::HSTRING`,
+        meaning that `.drop()` can never be called.
+
+        Because the Drop trait can only be implemented on "structs, enums, or unions" there is no way for
+        them to snoop on drop of &HSTRING.  There are some ways to break this, but I will not elaborate
+        on them here.
+        */
+        Param::Borrowed(self.as_hstring())
+    }
+}
+
+
+
+impl std::fmt::Debug for ICantBelieveItsNotHString<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:?}",self.as_hstring()))
+    }
+}
 
 
 ///Erased `ToParameterString`, this is an appropriate type for storing in a Builder or other short-term storage.
@@ -45,7 +119,8 @@ impl<'a> ParameterString<'a> {
 ///
 /// Generally you want to accept a generic parameter of the form `<K: IntoParameterString>`.
 pub trait IntoParameterString<'a> {
-    ///Converts into the hstring
+    ///Converts into an hstring 'trampoline'.  For reasons why this is not an hstring directly,
+    /// see [ICantBelieveItsNotHString].
     /// * `header`: A pointer to `HSTRING_HEADER`.  In some cases, this will be used in the conversion.
     ///
     /// # Safety
@@ -68,13 +143,14 @@ pub trait IntoParameterString<'a> {
     /// On Windows, each bindings crate is likely to declare its own HSTRING type.  Therefore,
     /// you may need to transmute the return value into "your" type, as distinct from the HSTRING
     /// type from pcore.
-    unsafe fn into_unsafe_hstring(self, header: &mut MaybeUninit<HSTRING_HEADER>) -> HSTRING where Self: Sized {
+    unsafe fn into_hstring_trampoline<'h,'r: 'a + 'h>(self, header: &'h mut MaybeUninit<HSTRING_HEADER>) -> ICantBelieveItsNotHString<'r> where Self: Sized  + 'a {
+        println!("initializing header {:p}",header);
         let parameter_string = self.into_parameter_string();
         let mut hstring = MaybeUninit::uninit();
         //ok to transmute here because windows won't mutate our string
         let pwstr = PWSTR(std::mem::transmute(parameter_string.0.as_ptr()));
         WindowsCreateStringReference(pwstr, parameter_string.0.len() as u32 - 1, header.assume_init_mut(), hstring.assume_init_mut()).unwrap();
-        hstring.assume_init()
+        ICantBelieveItsNotHString::from_fastpass_hstring(hstring.assume_init(),parameter_string.1)
     }
     ///Converts into a null-terminated pwstr.
     ///
@@ -95,8 +171,8 @@ pub trait IntoParameterString<'a> {
 }
 
 ///Implements conversions, primarily by copying
-impl<'a> IntoParameterString<'static> for &str {
-    fn into_parameter_string(self) -> ParameterString<'static> {
+impl<'a> IntoParameterString<'a> for &'a str {
+    fn into_parameter_string(self) -> ParameterString<'a> {
         //convert to utf16z
         let encode = self.encode_utf16();
         //reserve capacity for size_hint + 1 for null
@@ -214,7 +290,6 @@ impl std::fmt::Debug for OwnedString {
 macro_rules! pstr {
     ($expr:literal) => {
         {
-            let static_arr = wchar::wchz!($expr);
             pcore::string::StaticStr(wchar::wchz!($expr))
         }
 
@@ -222,8 +297,21 @@ macro_rules! pstr {
 }
 
 #[test] fn str_into() {
-    let f = "test";
+    use pcore_winbindings::Windows::Foundation::Uri;
+    let f = "https://sealedabstract.com";
     let mut h = MaybeUninit::uninit();
-    let hstr = unsafe{f.into_unsafe_hstring(&mut h)};
+    let hstr = unsafe{f.into_hstring_trampoline(&mut h)};
     println!("hstr {:?}",hstr);
+    //call some API that requires IntoParam
+    Uri::CreateUri(&hstr).unwrap();
+}
+
+#[test] fn static_into() {
+    use pcore_winbindings::Windows::Foundation::Uri;
+    let f = pstr!("https://sealedabstract.com");
+    let mut h = MaybeUninit::uninit();
+    let hstr = unsafe{f.into_hstring_trampoline(&mut h)};
+    println!("hstr {:?}",hstr);
+    //call some API that requires IntoParam
+    Uri::CreateUri(&hstr).unwrap();
 }

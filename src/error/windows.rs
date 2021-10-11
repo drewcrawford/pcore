@@ -1,5 +1,5 @@
 use std::fmt::{Display, Formatter};
-use winbindings::Windows::Win32::System::Diagnostics::Debug::WIN32_ERROR;
+use pcore_winbindings::Windows::Win32::System::Diagnostics::Debug::WIN32_ERROR;
 
 #[derive(Debug)]
 pub struct Error(WIN32_ERROR);
@@ -19,18 +19,18 @@ impl Error {
     /// Using this in pcore avoids a whole class of problems of the form "both you and some dependency
     /// import WIN32_ERROR, but they're different types"
     pub fn win32_last() -> Self {
-        use winbindings::Windows::Win32::System::Diagnostics::Debug::GetLastError;
+        use pcore_winbindings::Windows::Win32::System::Diagnostics::Debug::GetLastError;
         Error(unsafe{GetLastError()})
     }
 }
 impl From<WIN32_ERROR> for Error {
     fn from(e: WIN32_ERROR) -> Self {
-        Error::from_platform(e)
+        Error::from_win32(e)
     }
 }
 impl From<Error> for WIN32_ERROR {
     fn from(e: Error) -> Self {
-        e.into_platform()
+        e.into_win32()
     }
 }
 

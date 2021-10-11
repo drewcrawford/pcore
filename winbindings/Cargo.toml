@@ -6,7 +6,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-windows = {git = "https://github.com/drewcrawford/windows-rs.git"}
+windows = "0.21.1"
 
 [build-dependencies]
-windows = {git = "https://github.com/drewcrawford/windows-rs.git"}
+windows = "0.21.1"
