@@ -50,6 +50,7 @@ impl<'a> IntoParameterString<'a> for &'a str {
     }
 }
 
+#[derive(PartialEq,Eq,Hash)]
 pub struct ParameterString<'a>(StrongLifetimeCell<'a, NSString>);
 impl<'a> IntoParameterString<'a> for ParameterString<'a> {
     fn into_nsstring(self, _pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString> {
