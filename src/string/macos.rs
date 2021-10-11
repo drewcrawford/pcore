@@ -16,6 +16,17 @@ pub trait IntoParameterString<'a> {
     /// `storage`: Pass an instance of `MaybeUninit` here.
     fn into_nsstring(self, pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString>;
     ///Erases to a parameter string
+    ///
+    /// Design note.  You may try to get away with not passing a release pool in here.  In practice, objc APIs assume you did,
+    /// and to whatever extent you don't have a releasepool active is not documented.
+    ///
+    /// I looked into it, and a lot of things you might call in here (such as `[[NSString alloc] init]` don't actually try to autorelease anything.
+    /// However I'm not confident that every implementation of this trait ever, and all the OS changes year to year, won't brick me in some way.
+    /// So it's safer to just pass this in even in cases where it's not strictly necessary, vs either allocating a new one, or dealing
+    /// with the consequences of not having an active pool.
+    ///
+    /// This clutters up APIs a bit, but it's safer and not that much more work, and I don't think perf benefits are really there
+    /// to cut corners on it
     fn into_parameter_string(self, pool: &ActiveAutoreleasePool) -> ParameterString<'a> where Self: Sized {
         ParameterString(self.into_nsstring(pool))
     }
