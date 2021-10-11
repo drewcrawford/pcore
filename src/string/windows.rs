@@ -5,6 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::fmt::Formatter;
 use std::ffi::c_void;
 use ::windows::{HSTRING, Param};
+use crate::release_pool::ReleasePool;
 
 /**
 For reasons we will never know, Microsoft decided to cripple string interop performance
@@ -86,7 +87,7 @@ impl std::fmt::Debug for ICantBelieveItsNotHString<'_> {
 /// the storage lifetime.
 pub struct ParameterString<'a>(&'a [u16],Option<Box<[u16]>>);
 impl<'a> IntoParameterString<'a> for ParameterString<'a> {
-    fn into_parameter_string(self) -> ParameterString<'a> {
+    fn into_parameter_string(self, _pool: &ReleasePool) -> ParameterString<'a> {
         Self(self.0, self.1.clone())
     }
 }
@@ -133,10 +134,10 @@ pub trait IntoParameterString<'a> {
     ///
     ///```
     /// use std::mem::MaybeUninit;
-    /// use pcore::string::ToParameterString;
+    /// use pcore::string::IntoParameterString;
     /// let e = "foo";
     /// let mut header = MaybeUninit::uninit();
-    /// let h = unsafe{e.to_unsafe_hstring(&mut header)};
+    /// let h = unsafe{e.into_hstring_trampoline(&mut header)};
     /// ```
     ///
     /// # Note
@@ -144,8 +145,9 @@ pub trait IntoParameterString<'a> {
     /// you may need to transmute the return value into "your" type, as distinct from the HSTRING
     /// type from pcore.
     unsafe fn into_hstring_trampoline<'h,'r: 'a + 'h>(self, header: &'h mut MaybeUninit<HSTRING_HEADER>) -> ICantBelieveItsNotHString<'r> where Self: Sized  + 'a {
-        println!("initializing header {:p}",header);
-        let parameter_string = self.into_parameter_string();
+        //not needed on windows
+        let pool = ReleasePool::assuming_pool();
+        let parameter_string = self.into_parameter_string(pool);
         let mut hstring = MaybeUninit::uninit();
         //ok to transmute here because windows won't mutate our string
         let pwstr = PWSTR(std::mem::transmute(parameter_string.0.as_ptr()));
@@ -162,17 +164,21 @@ pub trait IntoParameterString<'a> {
     /// Note that the type returned here may be different than the PWSTR in use in some other library.  Therefore,
     /// you may need to transmute "this" type into "that" type.
     unsafe fn into_unsafe_const_pwzstr(self) -> PWSTR where Self: Sized {
-        let parameter_string = self.into_parameter_string();
+        //not needed on windows
+        let pool = ReleasePool::assuming_pool();
+        let parameter_string = self.into_parameter_string(pool);
         PWSTR(std::mem::transmute(parameter_string.0.as_ptr()))
     }
 
     ///Converts into an erased type
-    fn into_parameter_string(self) -> ParameterString<'a>;
+    ///
+    /// For compatibility with macOS, this takes a releasepool parameter
+    fn into_parameter_string(self, pool: &ReleasePool) -> ParameterString<'a>;
 }
 
 ///Implements conversions, primarily by copying
 impl<'a> IntoParameterString<'a> for &'a str {
-    fn into_parameter_string(self) -> ParameterString<'a> {
+    fn into_parameter_string(self, _pool: &ReleasePool) -> ParameterString<'a> {
         //convert to utf16z
         let encode = self.encode_utf16();
         //reserve capacity for size_hint + 1 for null
@@ -192,7 +198,7 @@ impl<'a> IntoParameterString<'a> for &'a str {
 #[doc(hidden)]
 pub struct StaticStr(pub &'static [u16]);
 impl IntoParameterString<'static> for StaticStr {
-    fn into_parameter_string(self) -> ParameterString<'static> {
+    fn into_parameter_string(self,_pool: &ReleasePool) -> ParameterString<'static> {
         ParameterString(self.0, None)
     }
 }
@@ -210,7 +216,7 @@ impl<'a> U16ZKnownLength<'a> {
     }
 }
 impl<'a> IntoParameterString<'a> for U16ZKnownLength<'a> {
-    fn into_parameter_string(self) -> ParameterString<'a> {
+    fn into_parameter_string(self,_pool: &ReleasePool) -> ParameterString<'a> {
         ParameterString(self.0, None)
     }
 }
@@ -247,7 +253,7 @@ impl<'a> std::fmt::Debug for U16ZErasedLength<'a> {
     }
 }
 impl<'a> IntoParameterString<'a> for &U16ZErasedLength<'a> {
-    fn into_parameter_string(self) -> ParameterString<'a> {
+    fn into_parameter_string(self,_pool: &ReleasePool) -> ParameterString<'a> {
         let actual_len = self.len_with_z();
         let actual_slice = unsafe{std::slice::from_raw_parts(self.0.as_ptr(), actual_len)};
         ParameterString(actual_slice, None)
@@ -264,7 +270,7 @@ impl<'a> IntoParameterString<'a> for &U16ZErasedLength<'a> {
 pub struct OwnedString(Box<[u16]>);
 
 impl<'a> IntoParameterString<'a> for &'a OwnedString {
-    fn into_parameter_string(self) -> ParameterString<'a> {
+    fn into_parameter_string(self,_pool: &ReleasePool) -> ParameterString<'a> {
         ParameterString(&self.0, None)
     }
 }

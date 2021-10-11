@@ -20,6 +20,11 @@ impl ReleasePool {
     pub unsafe fn new() -> Self {
         ReleasePool
     }
+    ///Assumes that a release pool is active
+    ///
+    /// # Safety
+    /// Not safe is no release pool is active
+    pub unsafe fn assuming_pool() -> &'static ReleasePool { &ReleasePool }
 }
 
 impl Deref for ReleasePool {
