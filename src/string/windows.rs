@@ -269,6 +269,13 @@ impl<'a> IntoParameterString<'a> for &U16ZErasedLength<'a> {
 /// On windows, implemented as a null-terminated utf16 string
 pub struct OwnedString(Box<[u16]>);
 
+impl ToString for OwnedString {
+    fn to_string(&self) -> String {
+        let s = &self.0.split_last().unwrap().1;
+        String::from_utf16(s).unwrap()
+    }
+}
+
 impl<'a> IntoParameterString<'a> for &'a OwnedString {
     fn into_parameter_string(self,_pool: &ReleasePool) -> ParameterString<'a> {
         ParameterString(&self.0, None)
@@ -281,6 +288,9 @@ impl std::fmt::Debug for OwnedString {
         f.write_str(&str)
     }
 }
+
+#[doc(hidden)]
+pub use wchar::wchz as __wchz;
 
 
 
@@ -296,7 +306,7 @@ impl std::fmt::Debug for OwnedString {
 macro_rules! pstr {
     ($expr:literal) => {
         {
-            pcore::string::StaticStr(wchar::wchz!($expr))
+            pcore::string::StaticStr(pcore::string::__wchz!($expr))
         }
 
     }
