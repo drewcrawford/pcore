@@ -1,11 +1,11 @@
 use std::mem::MaybeUninit;
-use pcore_winbindings::Windows::Win32::System::WinRT::{HSTRING_HEADER,WindowsCreateStringReference};
-use pcore_winbindings::Windows::Win32::Foundation::PWSTR;
 use std::hash::{Hash, Hasher};
 use std::fmt::Formatter;
 use std::ffi::c_void;
-use ::windows::{HSTRING, Param};
+use ::windows::runtime::{HSTRING, Param};
 use crate::release_pool::ReleasePool;
+use windows::Win32::System::WinRT::{HSTRING_HEADER, WindowsCreateStringReference};
+
 
 /**
 For reasons we will never know, Microsoft decided to cripple string interop performance
@@ -55,7 +55,7 @@ impl<'a> ICantBelieveItsNotHString<'a> {
 }
 ///This 'public', but `#[doc(hidden)]` API is required to define a type that can be passed
 /// into windows-rs methods.
-impl<'a> ::windows::IntoParam<'a, HSTRING> for &'a ICantBelieveItsNotHString<'a> {
+impl<'a> ::windows::runtime::IntoParam<'a, HSTRING> for &'a ICantBelieveItsNotHString<'a> {
     fn into_param(self) -> Param<'a, HSTRING> {
         /*This is really the whole secret, namely, that HSTRING crashes if it's dropped on a fast-pass
         string.  See https://github.com/microsoft/windows-rs/pull/1208 for "discussion"
@@ -195,9 +195,10 @@ impl<'a> IntoParameterString<'a> for &'a str {
         ParameterString(unsafe{std::slice::from_raw_parts(slice_ptr, slice_len)}, Some(boxed_slice))
     }
 }
-#[doc(hidden)]
-pub struct StaticStr(pub &'static [u16]);
-impl IntoParameterString<'static> for StaticStr {
+///Return type of [pstr!] macro
+#[derive(Copy,Clone)]
+pub struct PStr(pub &'static [u16]);
+impl IntoParameterString<'static> for PStr {
     fn into_parameter_string(self,_pool: &ReleasePool) -> ParameterString<'static> {
         ParameterString(self.0, None)
     }
@@ -291,12 +292,12 @@ impl std::fmt::Debug for OwnedString {
 
 #[doc(hidden)]
 pub use wchar::wchz as __wchz;
-
+use windows::Win32::Foundation::PWSTR;
 
 
 /// Provides a compile-time optimized path for parameter strings.
 ///
-/// This macro is defined to return a type of [IntoParameterString] that is reasonably fast
+/// This macro is defined to return a [PStr]
 /// ```
 /// use pcore::pstr;
 /// let e = pstr!("test");
@@ -306,14 +307,14 @@ pub use wchar::wchz as __wchz;
 macro_rules! pstr {
     ($expr:literal) => {
         {
-            pcore::string::StaticStr(pcore::string::__wchz!($expr))
+            pcore::string::PStr(pcore::string::__wchz!($expr))
         }
 
     }
 }
 
 #[test] fn str_into() {
-    use pcore_winbindings::Windows::Foundation::Uri;
+    use windows::Foundation::Uri;
     let f = "https://sealedabstract.com";
     let mut h = MaybeUninit::uninit();
     let hstr = unsafe{f.into_hstring_trampoline(&mut h)};
@@ -323,7 +324,7 @@ macro_rules! pstr {
 }
 
 #[test] fn static_into() {
-    use pcore_winbindings::Windows::Foundation::Uri;
+    use windows::Foundation::Uri;
     let f = pstr!("https://sealedabstract.com");
     let mut h = MaybeUninit::uninit();
     let hstr = unsafe{f.into_hstring_trampoline(&mut h)};
