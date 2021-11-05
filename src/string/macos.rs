@@ -37,18 +37,31 @@ pub trait IntoParameterString<'a> {
 objc_selector_group! {
     trait NSStringExtensionSelectors {
         @selector("initWithBytesNoCopy:length:encoding:freeWhenDone:")
+        @selector("initWithBytesNoCopy:length:encoding:deallocator:")
     }
     impl NSStringExtensionSelectors for Sel {}
 }
 
 trait NSStringExtension {
     fn from_bytes_no_copy<'a>(bytes: &'a [u8], pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString>;
+    fn from_bytes_no_copy_deallocator<'a>(bytes: &'a [u8], deallocator: &Deallocator, pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString>;
 }
+
+blocksr::once_escaping!(Deallocator(ptr: *const core::ffi::c_void, len: NSUInteger) -> ());
+unsafe impl Arguable for &Deallocator{}
+
 impl NSStringExtension for NSString {
     fn from_bytes_no_copy<'a>(bytes: &'a [u8], pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString> {
         unsafe {
             let uninit = Self::class().alloc(pool);
             let ptr = Self::perform(uninit, Sel::initWithBytesNoCopy_length_encoding_freeWhenDone(), pool, (bytes.as_ptr(), bytes.len() as NSUInteger, 4 as NSUInteger, false));
+            NSString::assume_nonnil(ptr).assume_retained_limited()
+        }
+    }
+    fn from_bytes_no_copy_deallocator<'a>(bytes: &'a [u8], deallocator: &Deallocator, pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString> {
+        unsafe {
+            let uninit = Self::class().alloc(pool);
+            let ptr = Self::perform(uninit, Sel::initWithBytesNoCopy_length_encoding_deallocator(), pool, (bytes.as_ptr(), bytes.len() as NSUInteger, 4 as NSUInteger, deallocator));
             NSString::assume_nonnil(ptr).assume_retained_limited()
         }
     }
@@ -58,6 +71,16 @@ impl<'a> IntoParameterString<'a> for &'a str {
     ///Borrow the bytes into an NSString instance.
     fn into_nsstring(self, pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString> {
         NSString::from_bytes_no_copy(self.as_bytes(), pool)
+    }
+}
+impl IntoParameterString<'static> for String {
+    fn into_nsstring(self, pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'static, NSString> {
+        //I think this is pinned for the lifetime of the string
+        let bytes = unsafe{std::slice::from_raw_parts(self.as_ptr(), self.len())};
+        let block = unsafe{Deallocator::new(|_,_| {
+            std::mem::drop(self);
+        })};
+        NSString::from_bytes_no_copy_deallocator(bytes, &block, pool)
     }
 }
 
@@ -76,19 +99,20 @@ impl OwnedString {
         OwnedString(str.copy(pool))
     }
 }
-#[doc(hidden)]
-pub struct StaticString(
+///An instance created by the [pstr!] macro.  This is a static string.
+#[derive(Copy,Clone)]
+pub struct PStr(
     #[doc(hidden)]
     pub &'static NSString
 );
-impl IntoParameterString<'static> for StaticString {
+impl IntoParameterString<'static> for PStr {
     fn into_nsstring(self, _pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'static, NSString> {
         unsafe{StrongLifetimeCell::assume_retained_limited(self.0) }
     }
 }
 /// Provides a compile-time optimized path for parameter strings.
 ///
-/// This macro is defined to return a type of [IntoPlatformString] that is reasonably fast
+/// This macro is defined to return type `Pstr`.  Generally, this is the supported constructor of that type.
 /// ```
 /// use pcore::pstr;
 /// let e = pstr!("test");
@@ -97,6 +121,16 @@ impl IntoParameterString<'static> for StaticString {
 #[macro_export]
 macro_rules! pstr {
     ($expr:literal) => {
-        pcore::string::StaticString(pcore::string::__objc_nsstring!($expr))
+        pcore::string::PStr(pcore::string::__objc_nsstring!($expr))
     }
+}
+
+#[test] fn from_owned_string() {
+    let f = "my test string".to_owned();
+    fn thunk<'a, I: IntoParameterString<'a>>(i: I) {
+        autoreleasepool(|pool| {
+            assert!(i.into_nsstring(pool).to_string() == "my test string")
+        })
+    }
+    thunk(f);
 }
