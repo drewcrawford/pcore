@@ -81,10 +81,27 @@ impl std::fmt::Debug for ICantBelieveItsNotHString<'_> {
 }
 
 
-///Erased `ToParameterString`, this is an appropriate type for storing in a Builder or other short-term storage.
-///
-/// The type may refer to external storage; in that case the lifetime parameter specifies
-/// the storage lifetime.
+/**
+A type that erases [IntoParameterString] into a concrete type with a named lifetime.
+
+This type is appropriate for use in a builder pattern, or other cases where the string
+will be stored for a short time.
+
+# Example
+
+```
+use pcore::string::{ParameterString,IntoParameterString};
+use pcore::release_pool::ReleasePool;
+struct StringBuilder<'a> {
+     inner: ParameterString<'a>,
+}
+impl<'a> StringBuilder<'a> {
+    fn new<S: IntoParameterString<'a>>(string: S, pool: &ReleasePool) -> Self {
+        Self { inner: string.into_parameter_string(pool) }
+    }
+}
+```
+ */
 pub struct ParameterString<'a>(&'a [u16],Option<Box<[u16]>>);
 impl<'a> IntoParameterString<'a> for ParameterString<'a> {
     fn into_parameter_string(self, _pool: &ReleasePool) -> ParameterString<'a> {
@@ -118,7 +135,26 @@ impl<'a> ParameterString<'a> {
 /// The methods of this trait is platform-specific, so don't use them in cross-platform code.
 /// The type itself however, is available everywhere.
 ///
-/// Generally you want to accept a generic parameter of the form `<K: IntoParameterString>`.
+/// Generally you want to accept a generic parameter of the form `<S: IntoParameterString>`, for example
+///
+///```
+/// use pcore::string::IntoParameterString;
+/// fn foo<S: IntoParameterString>(s: S) {
+///    //use `s`
+/// }
+/// ```
+///
+/// This trait is implemented by various standard library types ([str], [String], etc.) but also the output of [pstr!],
+/// platform-specific string types, and various others.  Any of these conforming types may be passed to the function directly.
+/// Encoding or conversion will be performed automatically if required.
+///
+/// For best performance, prefer passing a value of:
+/// 1.  [PStr], if the string can be known at compile-time
+/// 2.  [IntoParameterString], if one is available
+/// 3.  A platform-specific type, such as the result of calling an OS API.
+/// 4.  A type with the native encoding, such as UTF16 (on Windows), etc.
+/// 5.  A standard library type, like [String].
+///
 pub trait IntoParameterString<'a> {
     ///Converts into an hstring 'trampoline'.  For reasons why this is not an hstring directly,
     /// see [ICantBelieveItsNotHString].
@@ -139,11 +175,6 @@ pub trait IntoParameterString<'a> {
     /// let mut header = MaybeUninit::uninit();
     /// let h = unsafe{e.into_hstring_trampoline(&mut header)};
     /// ```
-    ///
-    /// # Note
-    /// On Windows, each bindings crate is likely to declare its own HSTRING type.  Therefore,
-    /// you may need to transmute the return value into "your" type, as distinct from the HSTRING
-    /// type from pcore.
     unsafe fn into_hstring_trampoline<'h,'r: 'a + 'h>(self, header: &'h mut MaybeUninit<HSTRING_HEADER>) -> ICantBelieveItsNotHString<'r> where Self: Sized  + 'a {
         //not needed on windows
         let pool = ReleasePool::assuming_pool();
@@ -195,7 +226,9 @@ impl<'a> IntoParameterString<'a> for &'a str {
         ParameterString(unsafe{std::slice::from_raw_parts(slice_ptr, slice_len)}, Some(boxed_slice))
     }
 }
-///Return type of [pstr!] macro
+///An instance created by the [pstr!] macro.  This is a static string.
+///
+/// Instances can be created with the [pstr!] macro.
 #[derive(Copy,Clone)]
 pub struct PStr(pub &'static [u16]);
 impl IntoParameterString<'static> for PStr {
@@ -265,9 +298,26 @@ impl<'a> IntoParameterString<'a> for &U16ZErasedLength<'a> {
     }
 }
 
-///Owned type, 'static lifetime, suitable for long-term storage
-///
-/// On windows, implemented as a null-terminated utf16 string
+/**
+An owned string type.  This may be appropriate for long-term string storage in a struct field.
+
+In some cases the implementation may copy the string into the type, in other cases there may
+be some platform-specific trick that can avoid a copy in certain cases.
+
+# Example
+```
+use pcore::string::{OwnedString,IntoParameterString};
+use pcore::release_pool::ReleasePool;
+struct MyType {
+     inner: OwnedString,
+}
+impl<'a> StringBuilder<'a> {
+    fn new<S: IntoParameterString<'a>>(string: S, pool: &ReleasePool) -> Self {
+        Self { inner: OwnedString::new(string,pool) }
+    }
+}
+```
+ */
 pub struct OwnedString(Box<[u16]>);
 
 impl ToString for OwnedString {

@@ -9,7 +9,25 @@ type NSUInteger = c_ulong;
 /// The methods of this trait is platform-specific, so don't use them in cross-platform code.
 /// The type itself however, is available everywhere.
 ///
-/// Generally you want to accept a generic parameter of the form `<K: IntoParameterString>`.
+/// Generally you want to accept a generic parameter of the form `<S: IntoParameterString>`, for example
+///
+///```
+/// use pcore::string::IntoParameterString;
+/// fn foo<'a, S: IntoParameterString<'a>>(s: S) {
+///    //use `s`
+/// }
+/// ```
+///
+/// This trait is implemented by various standard library types ([str], [String], etc.) but also the output of [pstr!],
+/// platform-specific string types, and various others.  Any of these conforming types may be passed to the function directly.
+/// Encoding or conversion will be performed automatically if required.
+///
+/// For best performance, prefer passing a value of:
+/// 1.  [PStr], if the string can be known at compile-time
+/// 2.  [IntoParameterString], if one is available
+/// 3.  A platform-specific type, such as the result of calling an OS API.
+/// 4.  A type with the native encoding, such as UTF16 (on Windows), etc.
+/// 5.  A standard library type, like [String].
 pub trait IntoParameterString<'a> {
     ///Converts to an NSString.
     ///
@@ -84,6 +102,26 @@ impl IntoParameterString<'static> for String {
     }
 }
 
+/**
+A type that erases [IntoParameterString] into a concrete type with a named lifetime.
+
+This type is appropriate for use in a builder pattern, or other cases where the string
+will be stored for a short time.
+
+# Example
+```
+use pcore::string::{ParameterString,IntoParameterString};
+use pcore::release_pool::ReleasePool;
+struct StringBuilder<'a> {
+     inner: ParameterString<'a>,
+}
+impl<'a> StringBuilder<'a> {
+    fn new<S: IntoParameterString<'a>>(string: S, pool: &ReleasePool) -> Self {
+        Self { inner: string.into_parameter_string(pool) }
+    }
+}
+```
+*/
 #[derive(PartialEq,Eq,Hash)]
 pub struct ParameterString<'a>(StrongLifetimeCell<'a, NSString>);
 impl<'a> IntoParameterString<'a> for ParameterString<'a> {
@@ -91,6 +129,26 @@ impl<'a> IntoParameterString<'a> for ParameterString<'a> {
         self.0
     }
 }
+/**
+An owned string type.  This may be appropriate for long-term string storage in a struct field.
+
+In some cases the implementation may copy the string into the type, in other cases there may
+be some platform-specific trick that can avoid a copy in certain cases.
+
+# Example
+```
+use pcore::string::{OwnedString,IntoParameterString};
+use pcore::release_pool::ReleasePool;
+struct MyType {
+     inner: OwnedString,
+}
+impl MyType {
+    fn new<'a, S: IntoParameterString<'a>>(string: S, pool: &ReleasePool) -> Self {
+        Self { inner: OwnedString::new(string,pool) }
+    }
+}
+```
+*/
 pub struct OwnedString(StrongCell<NSString>);
 impl OwnedString {
     ///Create a new [OwnedString] by copying another string.
@@ -100,6 +158,8 @@ impl OwnedString {
     }
 }
 ///An instance created by the [pstr!] macro.  This is a static string.
+///
+/// Instances can be created with the [pstr!] macro.
 #[derive(Copy,Clone)]
 pub struct PStr(
     #[doc(hidden)]
@@ -110,7 +170,11 @@ impl IntoParameterString<'static> for PStr {
         unsafe{StrongLifetimeCell::assume_retained_limited(self.0) }
     }
 }
-/// Provides a compile-time optimized path for parameter strings.
+
+//need to re-export this so it's usable from our macro...
+#[doc(hidden)]
+pub use objr as __objr;
+/// Provides a compile-time string.  The result of this expression conforms to [IntoParameterString].
 ///
 /// This macro is defined to return type `Pstr`.  Generally, this is the supported constructor of that type.
 /// ```
@@ -121,7 +185,10 @@ impl IntoParameterString<'static> for PStr {
 #[macro_export]
 macro_rules! pstr {
     ($expr:literal) => {
-        pcore::string::PStr(pcore::string::__objc_nsstring!($expr))
+        {
+            use pcore::string::__objr as objr;
+            pcore::string::PStr(pcore::string::__objc_nsstring!($expr))
+        }
     }
 }
 
