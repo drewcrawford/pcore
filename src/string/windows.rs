@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 use std::hash::{Hash, Hasher};
 use std::fmt::Formatter;
 use std::ffi::c_void;
-use ::windows::runtime::{HSTRING, Param};
+use windows::core::{HSTRING, Param};
 use crate::release_pool::ReleasePool;
 use windows::Win32::System::WinRT::{HSTRING_HEADER, WindowsCreateStringReference};
 
@@ -55,7 +55,7 @@ impl<'a> ICantBelieveItsNotHString<'a> {
 }
 ///This 'public', but `#[doc(hidden)]` API is required to define a type that can be passed
 /// into windows-rs methods.
-impl<'a> ::windows::runtime::IntoParam<'a, HSTRING> for &'a ICantBelieveItsNotHString<'a> {
+impl<'a> ::windows::core::IntoParam<'a, HSTRING> for &'a ICantBelieveItsNotHString<'a> {
     fn into_param(self) -> Param<'a, HSTRING> {
         /*This is really the whole secret, namely, that HSTRING crashes if it's dropped on a fast-pass
         string.  See https://github.com/microsoft/windows-rs/pull/1208 for "discussion"
@@ -139,7 +139,7 @@ impl<'a> ParameterString<'a> {
 ///
 ///```
 /// use pcore::string::IntoParameterString;
-/// fn foo<S: IntoParameterString>(s: S) {
+/// fn foo<'a, S: IntoParameterString<'a>>(s: S) {
 ///    //use `s`
 /// }
 /// ```
@@ -311,15 +311,30 @@ use pcore::release_pool::ReleasePool;
 struct MyType {
      inner: OwnedString,
 }
-impl<'a> StringBuilder<'a> {
-    fn new<S: IntoParameterString<'a>>(string: S, pool: &ReleasePool) -> Self {
+impl MyType {
+    fn new<'a, S: IntoParameterString<'a>>(string: S, pool: &ReleasePool) -> Self {
         Self { inner: OwnedString::new(string,pool) }
     }
 }
 ```
  */
 pub struct OwnedString(Box<[u16]>);
-
+impl OwnedString {
+    pub fn new<'a, S: IntoParameterString<'a>>(string: S, pool: &ReleasePool) -> Self {
+        let parameter_string = string.into_parameter_string(pool);
+        let boxed = match parameter_string {
+            ParameterString(_, Some(b)) => {
+                //move the box into the new type
+                b
+            }
+            ParameterString(slice,None) => {
+                //will require a clone
+                slice.to_owned().into_boxed_slice()
+            }
+        };
+        Self(boxed)
+    }
+}
 impl ToString for OwnedString {
     fn to_string(&self) -> String {
         let s = &self.0.split_last().unwrap().1;
