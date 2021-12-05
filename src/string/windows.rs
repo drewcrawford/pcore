@@ -101,6 +101,10 @@ impl<'a> StringBuilder<'a> {
     }
 }
 ```
+# Implementation
+
+On Windows, this type contains a slice of 0-terminated UTF-16, followed by owned storage (if needed, for example, for static strings).
+To implement borrowed types, storage can be set to `None`.
  */
 pub struct ParameterString<'a>(&'a [u16],Option<Box<[u16]>>);
 impl<'a> IntoParameterString<'a> for ParameterString<'a> {
@@ -229,11 +233,22 @@ impl<'a> IntoParameterString<'a> for &'a str {
 ///An instance created by the [pstr!] macro.  This is a static string.
 ///
 /// Instances can be created with the [pstr!] macro.
-#[derive(Copy,Clone)]
+#[derive(Copy,Clone,Debug)]
 pub struct PStr(pub &'static [u16]);
 impl IntoParameterString<'static> for PStr {
     fn into_parameter_string(self,_pool: &ReleasePool) -> ParameterString<'static> {
         ParameterString(self.0, None)
+    }
+}
+
+impl<'a> IntoParameterString<'a> for &'a std::path::Path {
+    fn into_parameter_string(self, _pool: &ReleasePool) -> ParameterString<'a> {
+        let encoded = widestring::U16CString::from_os_str(self.as_os_str()).unwrap();
+        let boxed = encoded.into_vec().into_boxed_slice();
+        //fool rust into letting us take &temp
+        let slice_ptr = boxed.as_ptr();
+        let slice_len = boxed.len();
+        ParameterString(unsafe{std::slice::from_raw_parts(slice_ptr, slice_len)}, Some(boxed))
     }
 }
 
