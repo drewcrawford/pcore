@@ -244,7 +244,7 @@ impl IntoParameterString<'static> for PStr {
 impl<'a> IntoParameterString<'a> for &'a std::path::Path {
     fn into_parameter_string(self, _pool: &ReleasePool) -> ParameterString<'a> {
         let encoded = widestring::U16CString::from_os_str(self.as_os_str()).unwrap();
-        let boxed = encoded.into_vec().into_boxed_slice();
+        let boxed = encoded.into_vec_with_nul().into_boxed_slice();
         //fool rust into letting us take &temp
         let slice_ptr = boxed.as_ptr();
         let slice_len = boxed.len();
@@ -411,4 +411,15 @@ macro_rules! pstr {
     println!("hstr {:?}",hstr);
     //call some API that requires IntoParam
     Uri::CreateUri(&hstr).unwrap();
+}
+
+#[test] fn path() {
+    use std::path::PathBuf;
+    use std::str::FromStr;
+    let p = PathBuf::from_str("test").unwrap();
+    let path = p.as_path();
+    let release_pool = unsafe{ReleasePool::new()};
+    let parameter_string = path.into_parameter_string(&release_pool);
+    let mut header = MaybeUninit::uninit();
+    let _ = unsafe{parameter_string.into_hstring_trampoline(&mut header)};
 }
