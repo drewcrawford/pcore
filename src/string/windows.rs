@@ -106,10 +106,11 @@ impl<'a> StringBuilder<'a> {
 On Windows, this type contains a slice of 0-terminated UTF-16, followed by owned storage (if needed, for example, for static strings).
 To implement borrowed types, storage can be set to `None`.
  */
+#[derive(Debug)]
 pub struct ParameterString<'a>(&'a [u16],Option<Box<[u16]>>);
 impl<'a> IntoParameterString<'a> for ParameterString<'a> {
     fn into_parameter_string(self, _pool: &ReleasePool) -> ParameterString<'a> {
-        Self(self.0, self.1.clone())
+        self
     }
 }
 
