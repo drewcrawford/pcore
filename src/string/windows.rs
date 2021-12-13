@@ -242,6 +242,12 @@ impl IntoParameterString<'static> for PStr {
     }
 }
 
+impl ToString for PStr {
+    fn to_string(&self) -> String {
+        unsafe{widestring::U16CStr::from_slice_with_nul_unchecked(self.0)}.to_string().unwrap()
+    }
+}
+
 impl<'a> IntoParameterString<'a> for &'a std::path::Path {
     fn into_parameter_string(self, _pool: &ReleasePool) -> ParameterString<'a> {
         let encoded = widestring::U16CString::from_os_str(self.as_os_str()).unwrap();
@@ -423,4 +429,9 @@ macro_rules! pstr {
     let parameter_string = path.into_parameter_string(&release_pool);
     let mut header = MaybeUninit::uninit();
     let _ = unsafe{parameter_string.into_hstring_trampoline(&mut header)};
+}
+
+#[test] fn to_string() {
+    let p = pstr!("Hello world");
+    assert_eq!(p.to_string(), "Hello world");
 }
