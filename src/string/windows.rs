@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 use std::hash::{Hash, Hasher};
 use std::fmt::Formatter;
 use std::ffi::c_void;
-use ::windows::runtime::{HSTRING, Param};
+use windows::core::{HSTRING, Param};
 use crate::release_pool::ReleasePool;
 use windows::Win32::System::WinRT::{HSTRING_HEADER, WindowsCreateStringReference};
 
@@ -55,7 +55,7 @@ impl<'a> ICantBelieveItsNotHString<'a> {
 }
 ///This 'public', but `#[doc(hidden)]` API is required to define a type that can be passed
 /// into windows-rs methods.
-impl<'a> ::windows::runtime::IntoParam<'a, HSTRING> for &'a ICantBelieveItsNotHString<'a> {
+impl<'a> ::windows::core::IntoParam<'a, HSTRING> for &'a ICantBelieveItsNotHString<'a> {
     fn into_param(self) -> Param<'a, HSTRING> {
         /*This is really the whole secret, namely, that HSTRING crashes if it's dropped on a fast-pass
         string.  See https://github.com/microsoft/windows-rs/pull/1208 for "discussion"
@@ -101,11 +101,16 @@ impl<'a> StringBuilder<'a> {
     }
 }
 ```
+# Implementation
+
+On Windows, this type contains a slice of 0-terminated UTF-16, followed by owned storage (if needed, for example, for static strings).
+To implement borrowed types, storage can be set to `None`.
  */
+#[derive(Debug)]
 pub struct ParameterString<'a>(&'a [u16],Option<Box<[u16]>>);
 impl<'a> IntoParameterString<'a> for ParameterString<'a> {
     fn into_parameter_string(self, _pool: &ReleasePool) -> ParameterString<'a> {
-        Self(self.0, self.1.clone())
+        self
     }
 }
 
@@ -139,7 +144,7 @@ impl<'a> ParameterString<'a> {
 ///
 ///```
 /// use pcore::string::IntoParameterString;
-/// fn foo<S: IntoParameterString>(s: S) {
+/// fn foo<'a, S: IntoParameterString<'a>>(s: S) {
 ///    //use `s`
 /// }
 /// ```
@@ -229,11 +234,28 @@ impl<'a> IntoParameterString<'a> for &'a str {
 ///An instance created by the [pstr!] macro.  This is a static string.
 ///
 /// Instances can be created with the [pstr!] macro.
-#[derive(Copy,Clone)]
+#[derive(Copy,Clone,Debug)]
 pub struct PStr(pub &'static [u16]);
 impl IntoParameterString<'static> for PStr {
     fn into_parameter_string(self,_pool: &ReleasePool) -> ParameterString<'static> {
         ParameterString(self.0, None)
+    }
+}
+
+impl ToString for PStr {
+    fn to_string(&self) -> String {
+        unsafe{widestring::U16CStr::from_slice_with_nul_unchecked(self.0)}.to_string().unwrap()
+    }
+}
+
+impl<'a> IntoParameterString<'a> for &'a std::path::Path {
+    fn into_parameter_string(self, _pool: &ReleasePool) -> ParameterString<'a> {
+        let encoded = widestring::U16CString::from_os_str(self.as_os_str()).unwrap();
+        let boxed = encoded.into_vec_with_nul().into_boxed_slice();
+        //fool rust into letting us take &temp
+        let slice_ptr = boxed.as_ptr();
+        let slice_len = boxed.len();
+        ParameterString(unsafe{std::slice::from_raw_parts(slice_ptr, slice_len)}, Some(boxed))
     }
 }
 
@@ -311,15 +333,30 @@ use pcore::release_pool::ReleasePool;
 struct MyType {
      inner: OwnedString,
 }
-impl<'a> StringBuilder<'a> {
-    fn new<S: IntoParameterString<'a>>(string: S, pool: &ReleasePool) -> Self {
+impl MyType {
+    fn new<'a, S: IntoParameterString<'a>>(string: S, pool: &ReleasePool) -> Self {
         Self { inner: OwnedString::new(string,pool) }
     }
 }
 ```
  */
 pub struct OwnedString(Box<[u16]>);
-
+impl OwnedString {
+    pub fn new<'a, S: IntoParameterString<'a>>(string: S, pool: &ReleasePool) -> Self {
+        let parameter_string = string.into_parameter_string(pool);
+        let boxed = match parameter_string {
+            ParameterString(_, Some(b)) => {
+                //move the box into the new type
+                b
+            }
+            ParameterString(slice,None) => {
+                //will require a clone
+                slice.to_owned().into_boxed_slice()
+            }
+        };
+        Self(boxed)
+    }
+}
 impl ToString for OwnedString {
     fn to_string(&self) -> String {
         let s = &self.0.split_last().unwrap().1;
@@ -381,4 +418,20 @@ macro_rules! pstr {
     println!("hstr {:?}",hstr);
     //call some API that requires IntoParam
     Uri::CreateUri(&hstr).unwrap();
+}
+
+#[test] fn path() {
+    use std::path::PathBuf;
+    use std::str::FromStr;
+    let p = PathBuf::from_str("test").unwrap();
+    let path = p.as_path();
+    let release_pool = unsafe{ReleasePool::new()};
+    let parameter_string = path.into_parameter_string(&release_pool);
+    let mut header = MaybeUninit::uninit();
+    let _ = unsafe{parameter_string.into_hstring_trampoline(&mut header)};
+}
+
+#[test] fn to_string() {
+    let p = pstr!("Hello world");
+    assert_eq!(p.to_string(), "Hello world");
 }
