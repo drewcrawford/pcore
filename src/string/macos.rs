@@ -160,7 +160,7 @@ impl OwnedString {
 ///An instance created by the [pstr!] macro.  This is a static string.
 ///
 /// Instances can be created with the [pstr!] macro.
-#[derive(Copy,Clone)]
+#[derive(Copy,Clone,Debug)]
 pub struct PStr(
     #[doc(hidden)]
     pub &'static NSString
