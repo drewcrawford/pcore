@@ -2,6 +2,7 @@ use objr::bindings::{AutoreleasePool, ActiveAutoreleasePool};
 use std::ops::Deref;
 
 ///This type can be deferenced to get a platform-specific pool type.
+#[repr(transparent)]
 pub struct ReleasePool(AutoreleasePool);
 
 ///Creates an autoreleasepool.
@@ -26,5 +27,13 @@ impl Deref for ReleasePool {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+impl From<&ActiveAutoreleasePool> for &ReleasePool {
+    fn from(f: &ActiveAutoreleasePool) -> Self {
+        //we are layout-compatible with AutoreleasePool.
+        unsafe {
+            std::mem::transmute(f)
+        }
     }
 }
