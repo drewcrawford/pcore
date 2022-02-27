@@ -5,7 +5,7 @@ use std::ffi::c_void;
 use windows::core::{HSTRING, Param};
 use crate::release_pool::ReleasePool;
 use windows::Win32::System::WinRT::{HSTRING_HEADER, WindowsCreateStringReference};
-
+use windows::core::PCWSTR;
 
 /**
 For reasons we will never know, Microsoft decided to cripple string interop performance
@@ -185,25 +185,26 @@ pub trait IntoParameterString<'a> {
         let pool = ReleasePool::assuming_pool();
         let parameter_string = self.into_parameter_string(pool);
         let mut hstring = MaybeUninit::uninit();
-        //ok to transmute here because windows won't mutate our string
-        let pwstr = PWSTR(std::mem::transmute(parameter_string.0.as_ptr()));
+        //ok to transmute here because windows won't mutate our string\
+        //and because parameter_string is null-terminated
+        let pwstr = PCWSTR(std::mem::transmute(parameter_string.0.as_ptr()));
         WindowsCreateStringReference(pwstr, parameter_string.0.len() as u32 - 1, header.assume_init_mut(), hstring.assume_init_mut()).unwrap();
         ICantBelieveItsNotHString::from_fastpass_hstring(hstring.assume_init(),parameter_string.1)
     }
-    ///Converts into a null-terminated pwstr.
+    ///Converts into a null-terminated PWCSTR.
     ///
     /// # Safety
-    /// * The resulting pwstr will be valid only
+    /// * The resulting pwcstr will be valid only
     /// * For the lifetime of the `self` parameter
-    /// * When the underlying PWSTR is not modified.  e.g., you must pass it to a function of type LPCWSTR
+    /// * When the underlying PCWSTR is not modified.  e.g., you must pass it to a function of type LPCWSTR
     ///
-    /// Note that the type returned here may be different than the PWSTR in use in some other library.  Therefore,
+    /// Note that the type returned here may be different than the PCWSTR in use in some other library.  Therefore,
     /// you may need to transmute "this" type into "that" type.
-    unsafe fn into_unsafe_const_pwzstr(self) -> PWSTR where Self: Sized {
+    unsafe fn into_unsafe_const_pwzstr(self) -> PCWSTR where Self: Sized {
         //not needed on windows
         let pool = ReleasePool::assuming_pool();
         let parameter_string = self.into_parameter_string(pool);
-        PWSTR(std::mem::transmute(parameter_string.0.as_ptr()))
+        PCWSTR(std::mem::transmute(parameter_string.0.as_ptr()))
     }
 
     ///Converts into an erased type
@@ -314,9 +315,9 @@ impl<'a> IntoParameterString<'a> for &U16ZErasedLength<'a> {
         let actual_slice = unsafe{std::slice::from_raw_parts(self.0.as_ptr(), actual_len)};
         ParameterString(actual_slice, None)
     }
-    unsafe fn into_unsafe_const_pwzstr(self) -> PWSTR where Self: Sized {
+    unsafe fn into_unsafe_const_pwzstr(self) -> PCWSTR where Self: Sized {
         //faster path without finding out length
-        PWSTR(std::mem::transmute(self.0.as_ptr()))
+        PCWSTR(std::mem::transmute(self.0.as_ptr()))
     }
 }
 
@@ -379,7 +380,7 @@ impl std::fmt::Debug for OwnedString {
 
 #[doc(hidden)]
 pub use wchar::wchz as __wchz;
-use windows::Win32::Foundation::PWSTR;
+
 
 
 /// Provides a compile-time optimized path for parameter strings.
