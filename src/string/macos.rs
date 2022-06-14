@@ -72,14 +72,14 @@ impl NSStringExtension for NSString {
     fn from_bytes_no_copy<'a>(bytes: &'a [u8], pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString> {
         unsafe {
             let uninit = Self::class().alloc(pool);
-            let ptr = Self::perform(uninit, Sel::initWithBytesNoCopy_length_encoding_freeWhenDone(), pool, (bytes.as_ptr(), bytes.len() as NSUInteger, 4 as NSUInteger, false));
+            let ptr = Self::perform(uninit, Sel::initWithBytesNoCopy_length_encoding_freeWhenDone(), pool, (bytes.as_ptr().assume_nonmut_perform(), bytes.len() as NSUInteger, 4 as NSUInteger, false));
             NSString::assume_nonnil(ptr).assume_retained_limited()
         }
     }
     fn from_bytes_no_copy_deallocator<'a>(bytes: &'a [u8], deallocator: &Deallocator, pool: &ActiveAutoreleasePool) -> StrongLifetimeCell<'a, NSString> {
         unsafe {
             let uninit = Self::class().alloc(pool);
-            let ptr = Self::perform(uninit, Sel::initWithBytesNoCopy_length_encoding_deallocator(), pool, (bytes.as_ptr(), bytes.len() as NSUInteger, 4 as NSUInteger, deallocator));
+            let ptr = Self::perform(uninit, Sel::initWithBytesNoCopy_length_encoding_deallocator(), pool, (bytes.as_ptr().assume_nonmut_perform(), bytes.len() as NSUInteger, 4 as NSUInteger, deallocator));
             NSString::assume_nonnil(ptr).assume_retained_limited()
         }
     }
