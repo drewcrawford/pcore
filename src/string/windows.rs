@@ -2,7 +2,8 @@ use std::mem::MaybeUninit;
 use std::hash::{Hash, Hasher};
 use std::fmt::Formatter;
 use std::ffi::c_void;
-use windows::core::{HSTRING, Param};
+use std::ops::Deref;
+use windows::core::{HSTRING,InParam};
 use crate::release_pool::ReleasePool;
 use windows::Win32::System::WinRT::{HSTRING_HEADER, WindowsCreateStringReference};
 use windows::core::PCWSTR;
@@ -18,11 +19,14 @@ As it happens, there's been a public Windows API for this since 2012.  It is [do
 [devblogged](https://devblogs.microsoft.com/oldnewthing/20160615-00/?p=93675), and [widely used](https://github.com/search?q=windowscreatestringreference&type=code)
 in projects like [chromium](https://github.com/chromium/chromium/blob/72ceeed2ebcd505b8d8205ed7354e862b871995e/base/win/hstring_reference.cc) and [Qt](https://github.com/qt/qtbase/blob/9db7cc79a26ced4997277b5c206ca15949133240/src/plugins/platforms/windows/qwin10helpers.cpp).
 
-However, calling this API using the official Rust bindings, crashes.  I [fixed the crash](https://github.com/microsoft/windows-rs/pull/1208), but MS wants to leave
+However, calling this API using the official Rust bindings, used to crash.  I [fixed the crash](https://github.com/microsoft/windows-rs/pull/1208), but MS wanted to leave
 the crash in as some kind of warning against faster strings performance.  The tagline is "any Windows API past, present, and future", but evidently not this one.
 
-Since we can't play nice upstream, I have solved their crash here with some complexity.  I'm sorry you have to read it, and even sorrier
-if you end up debugging it.  But I can promise if you send me PRs fixing my crashes I'll merge them :-)
+After rejecting my fix, they ended up [implementing it anyway](https://github.com/microsoft/windows-rs/commit/0625570a1b6ecd03988e7534fd29bb46815c0233#diff-23f263fd972314878152504fa401ddd588abd1d9aa96e07c2bde714b2fee1996),
+for reasons unknown.
+
+Basically, I am not very confident they intend to support my usecase, and to avoid coupling very tightly with them I am shipping my own compatible
+implementation, until such time as I become convinced we can play nice together.
 */
 #[repr(C)]
 pub struct ICantBelieveItsNotHString<'a>(&'a c_void,Option<Box<[u16]>>);
@@ -53,22 +57,41 @@ impl<'a> ICantBelieveItsNotHString<'a> {
         }
     }
 }
-///This 'public', but `#[doc(hidden)]` API is required to define a type that can be passed
-/// into windows-rs methods.
-impl<'a> ::windows::core::IntoParam<'a, HSTRING> for &'a ICantBelieveItsNotHString<'a> {
-    fn into_param(self) -> Param<'a, HSTRING> {
+///In previous releases of windows-rs, windows API took parameters of type `Into<Param<'a, HSTRING>>`.
+///
+/// A couple of things seem to have happened here:
+/// 1.  `Param` became `InParam`
+/// 2.  Most of the strings methods specifically started taking &HSTRING directly rather than this method.
+///
+/// Accordingly, I have ported this to `InParam` but it is not super useful these days.  Instead
+/// you want to deref to `&HSTRING` or call `.as_hstring()`.
+impl<'a> Into<InParam<'a, HSTRING>> for &'a ICantBelieveItsNotHString<'a> {
+    fn into(self) -> InParam<'a, HSTRING> {
         /*This is really the whole secret, namely, that HSTRING crashes if it's dropped on a fast-pass
-        string.  See https://github.com/microsoft/windows-rs/pull/1208 for "discussion"
-        of their implementation.
+string.  See https://github.com/microsoft/windows-rs/pull/1208 for "discussion"
+of their implementation.
 
-        By passing `Param::Borrowed(&HSTRING)` here, we avoid actually creating an owned version of `::windows::HSTRING`,
-        meaning that `.drop()` can never be called.
+By passing `Param::Borrowed(&HSTRING)` here, we avoid actually creating an owned version of `::windows::HSTRING`,
+meaning that `.drop()` can never be called.
 
-        Because the Drop trait can only be implemented on "structs, enums, or unions" there is no way for
-        them to snoop on drop of &HSTRING.  There are some ways to break this, but I will not elaborate
-        on them here.
-        */
-        Param::Borrowed(self.as_hstring())
+Because the Drop trait can only be implemented on "structs, enums, or unions" there is no way for
+them to snoop on drop of &HSTRING.  There are some ways to break this, but I will not elaborate
+on them here.
+*/
+        InParam::borrowed(windows::core::Borrowed::new(Some(self.as_hstring())))
+    }
+}
+
+/**
+In modern times, instead of taking InParam<'a, HSTRING>, windows-rs methods tend to take &HSTRING directly.
+
+So let's deref to it.
+*/
+impl<'a> Deref for ICantBelieveItsNotHString<'a> {
+    type Target = HSTRING;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_hstring()
     }
 }
 
@@ -401,13 +424,12 @@ macro_rules! pstr {
     }
 }
 
-#[test] fn str_into() {
+#[test] fn str_call() {
     use windows::Foundation::Uri;
     let f = "https://sealedabstract.com";
     let mut h = MaybeUninit::uninit();
     let hstr = unsafe{f.into_hstring_trampoline(&mut h)};
     println!("hstr {:?}",hstr);
-    //call some API that requires IntoParam
     Uri::CreateUri(&hstr).unwrap();
 }
 
