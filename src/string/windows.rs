@@ -1,8 +1,9 @@
 use std::mem::MaybeUninit;
 use std::hash::{Hash, Hasher};
 use std::fmt::Formatter;
-use std::ffi::c_void;
+use std::ffi::{c_void, OsString};
 use std::ops::Deref;
+use std::os::windows::ffi::OsStrExt;
 use windows::core::{HSTRING,InParam};
 use crate::release_pool::ReleasePool;
 use windows::Win32::System::WinRT::{HSTRING_HEADER, WindowsCreateStringReference};
@@ -272,6 +273,17 @@ impl ToString for PStr {
     }
 }
 
+impl<'a> IntoParameterString<'static> for OsString {
+    fn into_parameter_string(self, _pool: &ReleasePool) -> ParameterString<'static> {
+        let owned_storage: Vec<u16> = self.encode_wide().chain(std::iter::once(0)).collect();
+        let boxed_bytes = owned_storage.into_boxed_slice();
+        //fool rust into letting us take &temp
+        let slice_ptr = boxed_bytes.as_ptr();
+        let slice_len = boxed_bytes.len();
+        ParameterString(unsafe{std::slice::from_raw_parts(slice_ptr, slice_len)}, Some(boxed_bytes))
+    }
+}
+
 impl<'a> IntoParameterString<'a> for &'a std::path::Path {
     fn into_parameter_string(self, _pool: &ReleasePool) -> ParameterString<'a> {
         let encoded = widestring::U16CString::from_os_str(self.as_os_str()).unwrap();
@@ -350,7 +362,7 @@ An owned string type.  This may be appropriate for long-term string storage in a
 In some cases the implementation may copy the string into the type, in other cases there may
 be some platform-specific trick that can avoid a copy in certain cases.
 
-# Example
+# Examplef
 ```
 use pcore::string::{OwnedString,IntoParameterString};
 use pcore::release_pool::ReleasePool;
@@ -440,6 +452,15 @@ macro_rules! pstr {
     let hstr = unsafe{f.into_hstring_trampoline(&mut h)};
     println!("hstr {:?}",hstr);
     //call some API that requires IntoParam
+    Uri::CreateUri(&hstr).unwrap();
+}
+#[test] fn os_string() {
+    use windows::Foundation::Uri;
+    use std::str::FromStr;
+    let string = OsString::from_str("https://sealedabstract.com").unwrap();
+    let mut h = MaybeUninit::uninit();
+    let hstr = unsafe{string.into_hstring_trampoline(&mut h)};
+    println!("hstr {:?}",hstr);
     Uri::CreateUri(&hstr).unwrap();
 }
 

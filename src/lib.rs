@@ -53,4 +53,5 @@ pub mod string;
 pub mod release_pool;
 pub mod error;
 extern crate self as pcore;
+extern crate core;
 
