@@ -212,7 +212,7 @@ pub trait IntoParameterString<'a> {
         //ok to transmute here because windows won't mutate our string\
         //and because parameter_string is null-terminated
         let pwstr = PCWSTR(std::mem::transmute(parameter_string.0.as_ptr()));
-        WindowsCreateStringReference(pwstr, parameter_string.0.len() as u32 - 1, header.assume_init_mut(), hstring.assume_init_mut()).unwrap();
+        WindowsCreateStringReference(pwstr, parameter_string.0.len() as u32 - 1, header.assume_init_mut(), Some(hstring.assume_init_mut())).unwrap();
         ICantBelieveItsNotHString::from_fastpass_hstring(hstring.assume_init(),parameter_string.1)
     }
     ///Converts into a null-terminated PWCSTR.
